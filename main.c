@@ -14,7 +14,7 @@
 *
 ******************************************************************************
 *
-* Copyright (c) 2015-2020, Infineon Technologies AG
+* Copyright (c) 2015-2022, Infineon Technologies AG
 * All rights reserved.
 *
 * Boost Software License - Version 1.0 - August 17th, 2003
@@ -43,42 +43,47 @@
 * DEALINGS IN THE SOFTWARE.
 *
 *****************************************************************************/
+
+#include <stdio.h>
 #include "cybsp.h"
 #include "cy_utils.h"
-#include <xmc_vadc.h>
-#include <stdio.h>
-#include "retarget_io.h"
+#include "cy_retarget_io.h"
+#include "xmc_vadc.h"
 
 /*******************************************************************************
 * Macros
 *******************************************************************************/
-/* Define macros for XMC14x Boot kit */
-#ifdef TARGET_KIT_XMC14_BOOT_001
-#define RES_REG_NUMBER                 (10)          /* Result register number*/
-#define CHANNEL_NUMBER                 (7U)          /* Channel number */
-#define GROUP_NUMBER                   (1U)          /* Group number */
-#define VADC_GROUP_PTR                 (VADC_G1)     /* VADC group G1 */
+
+/* Define macros for XMC1x Boot kit */
+#if (UC_SERIES == XMC14)
+#define XMC1x_KIT                           (1)     /* XMC1x kit selected */
+#define RES_REG_NUMBER                      (10)    /* Result register number */
+#define CHANNEL_NUMBER                      (4U)    /* Channel number */
 #endif
 
-/* Define macros for XMC47x Relax kit */
-#ifdef TARGET_KIT_XMC47_RELAX_V1
-#define RES_REG_NUMBER                 (4)           /* Result register number*/
-#define CHANNEL_NUMBER                 (5U)          /* Channel number */
-#define GROUP_NUMBER                   (3U)          /* Group number */
-#define VADC_GROUP_PTR                 (VADC_G3)     /* VADC group G3 */
+/* Define macros for XMC4x kit */
+#if (UC_SERIES == XMC47)
+#define XMC4x_KIT                           (1)     /* XMC4x kit selected */
+#define RES_REG_NUMBER                      (4)     /* Result register number */
+    #define CHANNEL_NUMBER                  (6U)    /* Channel number */
+#endif
+
+#define VADC_GROUP_PTR                      (VADC_G0)/* VADC group G0 */
+#define GROUP_NUMBER                        (0U)     /* Group number */
+
+/* Define macro to enable/disable printing of debug messages */
+#define ENABLE_XMC_DEBUG_PRINT              (0)
+
+/* Define macro to set the loop count before printing debug messages */
+#if ENABLE_XMC_DEBUG_PRINT
+#define DEBUG_LOOP_COUNT_MAX                (1U)
 #endif
 
 /*******************************************************************************
 * Data Structures
 *******************************************************************************/
 /* Initialization data of a VADC Global */
-XMC_VADC_GLOBAL_CONFIG_t g_global_config =
-{
-    .clock_config =
-    {
-    .analog_clock_divider    = 3,  /* Clock for the converter */
-    },
-};
+XMC_VADC_GLOBAL_CONFIG_t g_global_config = { };
 
 /* VADC group data configuration. No configuration needed, standard values
  * are used.
@@ -94,6 +99,7 @@ XMC_VADC_CHANNEL_CONFIG_t  g_channel_config =
     .alias_channel     = (int8_t)  XMC_VADC_CHANNEL_ALIAS_DISABLED, /* ALIAS is Disabled */
     .result_reg_number = RES_REG_NUMBER, /* Result Register */
 };
+
 
 /*******************************************************************************
 * Function Name: main
@@ -120,6 +126,12 @@ int main(void)
     /* ADC result variable */
     XMC_VADC_RESULT_SIZE_t adc_result = 0;
 
+    #if ENABLE_XMC_DEBUG_PRINT
+    /* Initialize the current loop counters to zero */
+    static uint32_t debug_loop_count_over_limit  = 0;
+    static uint32_t debug_loop_count_below_limit = 0;
+    #endif
+
     /* Initialize the device and board peripherals */
     result = cybsp_init();
     if (result != CY_RSLT_SUCCESS)
@@ -128,7 +140,7 @@ int main(void)
     }
 
     /* Initialize retarget-io to use the debug UART port */
-    retarget_io_init();
+    cy_retarget_io_init(CYBSP_DEBUG_UART_HW);
     printf("ADC Conversion starts \r\n");
 
     /* Initialize an instance of Global hardware */
@@ -140,6 +152,9 @@ int main(void)
     /* Set VADC group to normal operation mode (VADC kernel) */
     XMC_VADC_GROUP_SetPowerMode(VADC_GROUP_PTR, XMC_VADC_GROUP_POWERMODE_NORMAL);
 
+    /* Initialize the channel unit */
+    XMC_VADC_GROUP_ChannelInit(VADC_GROUP_PTR, CHANNEL_NUMBER, &g_channel_config );
+
     /* Calibrate the VADC. Make sure you do this after all used VADC groups
     * are set to normal operation mode */
     XMC_VADC_GLOBAL_StartupCalibration(VADC);
@@ -147,9 +162,6 @@ int main(void)
     /* Initialize the background source hardware. The gating mode is set to
     * ignore to pass external triggers unconditionally */
     XMC_VADC_GLOBAL_BackgroundInit(VADC, &g_bgn_handle);
-
-    /* Initialize the channel unit */
-    XMC_VADC_GROUP_ChannelInit(VADC_GROUP_PTR, CHANNEL_NUMBER, &g_channel_config );
 
     /* Add a channel to the background source */
     XMC_VADC_GLOBAL_BackgroundAddChannelToSequence(VADC, GROUP_NUMBER, CHANNEL_NUMBER);
@@ -162,30 +174,45 @@ int main(void)
 
     while (1U)
     {
-        /* Retrieve result from result register */
-        adc_result = XMC_VADC_GROUP_GetResult(VADC_GROUP_PTR,RES_REG_NUMBER);
+        adc_result = XMC_VADC_GROUP_GetResult(VADC_GROUP_PTR, RES_REG_NUMBER);
 
         /* Prints the result in UART Terminal */
         printf("ADC Result value is %x \r\n", adc_result);
 
         /* Compare the result counts */
-        if(adc_result >= 2000)
+        if (adc_result >= 2000)
         {
-            #ifdef TARGET_KIT_XMC14_BOOT_001
-            XMC_GPIO_SetOutputLow(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
+            #if ENABLE_XMC_DEBUG_PRINT
+            debug_loop_count_over_limit++;
+            if (debug_loop_count_over_limit == DEBUG_LOOP_COUNT_MAX)
+            {
+                /* Print message after the loop has run DEBUG_LOOP_COUNT_MAX times */
+                printf("ADC result greater than 2000\r\n");
+            }
+            #endif
+            #if XMC1x_KIT
+                XMC_GPIO_SetOutputLow(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
 
-            #ifdef TARGET_KIT_XMC47_RELAX_V1
+            #if XMC4x_KIT
             XMC_GPIO_SetOutputHigh(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
         }
         else
         {
-            #ifdef TARGET_KIT_XMC14_BOOT_001
-            XMC_GPIO_SetOutputHigh(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
+            #if ENABLE_XMC_DEBUG_PRINT
+            debug_loop_count_below_limit++;
+            if (debug_loop_count_below_limit == DEBUG_LOOP_COUNT_MAX)
+            {
+                /* Print message after the loop has run DEBUG_LOOP_COUNT_MAX times */
+                printf("ADC result less than 2000\r\n");
+            }
+            #endif
+            #if XMC1x_KIT
+                XMC_GPIO_SetOutputHigh(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
 
-            #ifdef TARGET_KIT_XMC47_RELAX_V1
+            #if XMC4x_KIT
             XMC_GPIO_SetOutputLow(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
         }
