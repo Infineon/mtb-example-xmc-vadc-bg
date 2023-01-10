@@ -48,28 +48,36 @@
 #include "cybsp.h"
 #include "cy_utils.h"
 #include "cy_retarget_io.h"
-#include "xmc_vadc.h"
 
 /*******************************************************************************
 * Macros
 *******************************************************************************/
 
 /* Define macros for XMC1x Boot kit */
-#if (UC_SERIES == XMC14)
-#define XMC1x_KIT                           (1)     /* XMC1x kit selected */
+#if (UC_FAMILY == XMC1)
 #define RES_REG_NUMBER                      (10)    /* Result register number */
-#define CHANNEL_NUMBER                      (4U)    /* Channel number */
+    #if (UC_SERIES == XMC13) || (UC_SERIES == XMC14)
+    #define CHANNEL_NUMBER                  (7U)    /* Channel number */
+    #else
+    #define CHANNEL_NUMBER                  (4U)    /* Channel number */
+    #endif
 #endif
 
 /* Define macros for XMC4x kit */
-#if (UC_SERIES == XMC47)
-#define XMC4x_KIT                           (1)     /* XMC4x kit selected */
+#if (UC_FAMILY == XMC4)
 #define RES_REG_NUMBER                      (4)     /* Result register number */
+    #if (UC_SERIES==XMC42) || (UC_SERIES==XMC43) || (UC_SERIES==XMC44)
+    #define CHANNEL_NUMBER                  (0U)    /* Channel number */
+    #elif (UC_SERIES == XMC48) || (UC_SERIES == XMC47)
+    #define CHANNEL_NUMBER                  (5U)    /* Channel number */
+    #else
     #define CHANNEL_NUMBER                  (6U)    /* Channel number */
+    #endif
 #endif
 
-#define VADC_GROUP_PTR                      (VADC_G0)/* VADC group G0 */
-#define GROUP_NUMBER                        (0U)     /* Group number */
+/*******************************************************************************
+* Defines
+*******************************************************************************/
 
 /* Define macro to enable/disable printing of debug messages */
 #define ENABLE_XMC_DEBUG_PRINT              (0)
@@ -78,28 +86,6 @@
 #if ENABLE_XMC_DEBUG_PRINT
 #define DEBUG_LOOP_COUNT_MAX                (1U)
 #endif
-
-/*******************************************************************************
-* Data Structures
-*******************************************************************************/
-/* Initialization data of a VADC Global */
-XMC_VADC_GLOBAL_CONFIG_t g_global_config = { };
-
-/* VADC group data configuration. No configuration needed, standard values
- * are used.
- */
-const XMC_VADC_GROUP_CONFIG_t g_group_handle = { };
-
-/* Data configuration for background source */
-const XMC_VADC_BACKGROUND_CONFIG_t g_bgn_handle = { };
-
-/* Initialization data of a VADC Channel */
-XMC_VADC_CHANNEL_CONFIG_t  g_channel_config =
-{
-    .alias_channel     = (int8_t)  XMC_VADC_CHANNEL_ALIAS_DISABLED, /* ALIAS is Disabled */
-    .result_reg_number = RES_REG_NUMBER, /* Result Register */
-};
-
 
 /*******************************************************************************
 * Function Name: main
@@ -143,28 +129,8 @@ int main(void)
     cy_retarget_io_init(CYBSP_DEBUG_UART_HW);
     printf("ADC Conversion starts \r\n");
 
-    /* Initialize an instance of Global hardware */
-    XMC_VADC_GLOBAL_Init(VADC, &g_global_config);
-
-    /* Initialize Group */
-    XMC_VADC_GROUP_Init(VADC_GROUP_PTR, &g_group_handle);
-
-    /* Set VADC group to normal operation mode (VADC kernel) */
-    XMC_VADC_GROUP_SetPowerMode(VADC_GROUP_PTR, XMC_VADC_GROUP_POWERMODE_NORMAL);
-
-    /* Initialize the channel unit */
-    XMC_VADC_GROUP_ChannelInit(VADC_GROUP_PTR, CHANNEL_NUMBER, &g_channel_config );
-
-    /* Calibrate the VADC. Make sure you do this after all used VADC groups
-    * are set to normal operation mode */
-    XMC_VADC_GLOBAL_StartupCalibration(VADC);
-
-    /* Initialize the background source hardware. The gating mode is set to
-    * ignore to pass external triggers unconditionally */
-    XMC_VADC_GLOBAL_BackgroundInit(VADC, &g_bgn_handle);
-
     /* Add a channel to the background source */
-    XMC_VADC_GLOBAL_BackgroundAddChannelToSequence(VADC, GROUP_NUMBER, CHANNEL_NUMBER);
+    XMC_VADC_GLOBAL_BackgroundAddChannelToSequence(VADC, VADC_GROUP_NUM, CHANNEL_NUMBER);
 
     /* Enables Auto scan feature for continuous conversion */
     XMC_VADC_GLOBAL_BackgroundEnableContinuousMode(VADC);
@@ -174,7 +140,12 @@ int main(void)
 
     while (1U)
     {
-        adc_result = XMC_VADC_GROUP_GetResult(VADC_GROUP_PTR, RES_REG_NUMBER);
+        #if (UC_SERIES == XMC11)
+        /* Retrieve result from result register */
+        adc_result = XMC_VADC_GLOBAL_GetResult(VADC);
+        #else
+        adc_result = XMC_VADC_GROUP_GetResult(VADC_GROUP_HW, RES_REG_NUMBER);
+        #endif
 
         /* Prints the result in UART Terminal */
         printf("ADC Result value is %x \r\n", adc_result);
@@ -190,11 +161,15 @@ int main(void)
                 printf("ADC result greater than 2000\r\n");
             }
             #endif
-            #if XMC1x_KIT
+            #if (UC_FAMILY == XMC1)
+                #if (UC_SERIES == XMC11)
+                XMC_GPIO_SetOutputLow(CYBSP_USER_LED3_PORT, CYBSP_USER_LED3_PIN);
+                #else
                 XMC_GPIO_SetOutputLow(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
+                #endif
             #endif
 
-            #if XMC4x_KIT
+            #if (UC_FAMILY == XMC4)
             XMC_GPIO_SetOutputHigh(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
         }
@@ -208,11 +183,15 @@ int main(void)
                 printf("ADC result less than 2000\r\n");
             }
             #endif
-            #if XMC1x_KIT
+            #if (UC_FAMILY == XMC1)
+                #if (UC_SERIES == XMC11)
+                XMC_GPIO_SetOutputHigh(CYBSP_USER_LED3_PORT, CYBSP_USER_LED3_PIN);
+                #else
                 XMC_GPIO_SetOutputHigh(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
+                #endif
             #endif
 
-            #if XMC4x_KIT
+            #if (UC_FAMILY == XMC4)
             XMC_GPIO_SetOutputLow(CYBSP_USER_LED_PORT, CYBSP_USER_LED_PIN);
             #endif
         }
